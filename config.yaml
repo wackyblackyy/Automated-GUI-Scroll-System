@@ -18,7 +18,7 @@ targets:
     threshold: 0.80
 
 templates:
-  hud: templates/hud_secret_shop.png          # "Secret Shop" title, used to detect the screen and its scale
+  hud: templates/hud_secret_shop.png          # "< Secret Shop" title incl. back arrow (so it can't match "Secret Shop Level 13")
   buy_button: templates/buy_button.png        # "1/1" pill of an item's Buy button (absent once sold)
   refresh_button: templates/refresh_button.png
   # Blue "Confirm" button of the popups. confirm_refresh.png comes from the
@@ -37,7 +37,7 @@ thresholds:
 calibration_scales: {min: 0.35, max: 2.0, step: 0.05}
 
 layout:
-  hud_anchor: [90, 22]              # top-left of the HUD template in the reference shot
+  hud_anchor: [25, 18]              # top-left of the HUD template ("< Secret Shop") in the reference shot
   list_region: [620, 90, 1815, 1040]  # x1, y1, x2, y2 of the scrolling item list
   icon_column_x: [760, 980]         # x-range of the item icons inside the list
   refresh_region: [0, 850, 620, 1040]  # bottom-left corner holding the Refresh button

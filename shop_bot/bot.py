@@ -163,6 +163,11 @@ class ShopBot:
         frame = self._require_hud()
         btn = self.det.find_button(frame, "refresh")
         if btn is None:
+            # the window may have moved or been resized: recalibrate and look everywhere
+            log.info("Refresh button not where expected - recalibrating")
+            self.det.calibrate(frame)
+            btn = self.det.find_button(frame, "refresh", anywhere=True)
+        if btn is None:
             raise StopBot("Refresh button not found")
         self.screen.click(*btn.center, "Refresh")
         if not self.screen.dry_run and not self._confirm("confirm_refresh", frame):

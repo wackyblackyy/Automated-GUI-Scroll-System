@@ -138,7 +138,7 @@ class ShopDetector:
         return found
 
     # -------------------------------------------------------------- buttons
-    def find_button(self, frame: np.ndarray, which: str) -> Match | None:
+    def find_button(self, frame: np.ndarray, which: str, anywhere: bool = False) -> Match | None:
         tmpl = {
             "refresh": self.refresh_tmpl,
             "confirm_buy": self.confirm_buy_tmpl,
@@ -146,7 +146,9 @@ class ShopDetector:
         }[which]
         if tmpl is None:
             return None
-        region = self._region("refresh_region") if which == "refresh" and self.calibration else None
+        region = None
+        if which == "refresh" and self.calibration and not anywhere:
+            region = self._region("refresh_region")
         m = vision.find_best(frame, tmpl, self._scales(), region)
         return m if m and m.score >= self.cfg["thresholds"]["buttons"] else None
 

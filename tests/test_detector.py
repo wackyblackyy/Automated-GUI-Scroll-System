@@ -84,3 +84,18 @@ def test_popup_button_finder_picks_blue_confirm_not_cancel(det):
     assert m is not None
     x, y = m.center
     assert 790 <= x <= 1005 and 525 <= y <= 585
+
+
+def test_hud_is_the_title_not_shop_level_text(det):
+    """Regression: the old template matched "Secret Shop Level 13" (bottom-left),
+    shifting the whole layout off-screen so Refresh was never found."""
+    frame = vision.load_image(FIX / "shop_hud_1919.png")      # 1919x1079 live screenshot
+    cal = det.calibrate(frame)
+    assert cal is not None and cal.hud.y < 100 and abs(cal.scale - 1.036) < 0.03
+    btn = det.find_button(frame, "refresh")
+    assert btn is not None
+    x, y = btn.center
+    assert 280 <= x <= 540 and 950 <= y <= 1030               # the green Refresh, bottom-left
+    x1, y1, x2, y2 = det.list_region()
+    assert 600 < x1 < 700 and x2 > 1800 and y2 > 1000          # item list on the right
+    assert det.find_targets(frame) == []                       # none of the targets on this page
