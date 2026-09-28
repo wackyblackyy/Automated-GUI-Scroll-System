@@ -5,7 +5,7 @@ Hands-free loop for the Epic Seven **Secret Shop**:
 1. Finds the Secret Shop screen (the "Secret Shop" title in the top-left) and works out your window's size and scale.
 2. Scans the item list on the right for **Covenant Bookmarks** and **Mystic Medals**.
 3. Clicks **Buy** on each one it finds and presses **Yes/Buy** on the confirmation popup.
-4. Scrolls the list down and scans again until the list stops moving.
+4. Flicks the list to the other end and scans on the way. It scans down on one page and back up on the next, so it never spends time scrolling back to the top. If the game resets the list to the top after a refresh, the bot notices and always scans downward.
 5. Presses **Refresh** (bottom-left), confirms the popup, and starts over.
 6. Stops after `max_refreshes` (default 50 refreshes = 150 skystones), then prints a summary and appends each item it finds to `shop_log.csv`.
 
@@ -33,7 +33,7 @@ python -m shop_bot run --dry-run    # log where it *would* click
 
 ### The confirmation popups
 
-The screenshots you gave me don't include the "Do you want to confirm?" popups, so the bot learns them itself. The first time a popup appears, it looks for the new green button that wasn't on screen before the click (the Yes/Buy button on the right; Cancel isn't green). It clicks that button, checks the popup closed, and saves the button as `templates/confirm_buy.png` / `templates/confirm_refresh.png`. After that it uses the saved images.
+The blue **Confirm** button from the "Use Skystone to refresh?" popup is saved as `templates/confirm_refresh.png`, and the bot also tries it on the purchase popup. If the purchase popup's button looks different, the bot looks for the new bright-blue or green button that appeared after the click. It picks the right-most one (Cancel is brown), clicks it, checks the popup closed, and saves it as `templates/confirm_buy.png` for next time.
 
 If it ever picks the wrong button, delete the saved PNG and make one yourself:
 
@@ -57,7 +57,6 @@ python -m pytest            # runs against the screenshots in tests/fixtures
 | `actions.max_refreshes` | Skystone budget (3 per refresh). |
 | `scroll.method` | Use `drag` (default) for emulator/touch-style lists, or `wheel` if your client scrolls with the mouse wheel. |
 | `scroll.drag_duration`, `scroll.settle` | Increase these if the list flings past items or the screenshot is taken mid-scroll. |
-| `scroll.top_after_refresh` | Set to `false` if a refreshed list doesn't start at the top. |
 | `actions.click_delay` | Increase this on a slow PC/emulator. |
 | `monitor` | Which monitor the game is on (`python -m shop_bot monitors`). |
 
@@ -72,7 +71,7 @@ Layout numbers are in the pixel coordinates of the 1852×1040 reference screensh
 
 The bot finds a row's Buy button by matching its **"1/1"** half, so the click glow over "Buy" doesn't break detection. A row with no "1/1" (already bought) is skipped.
 
-Each scan takes about 40 ms per frame after the first calibration.
+Each scan takes about 40 ms per frame after the first calibration. Each flick is a 0.15 s drag, followed by a 0.3 s pause so the list can settle. The bot measures how far the list moved, so hitting the end of the list is detected without an extra check flick. After a refresh it continues as soon as the new list appears, instead of waiting a fixed time.
 
 ## Notes
 

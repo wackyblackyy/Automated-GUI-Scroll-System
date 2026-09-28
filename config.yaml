@@ -21,10 +21,11 @@ templates:
   hud: templates/hud_secret_shop.png          # "Secret Shop" title, used to detect the screen and its scale
   buy_button: templates/buy_button.png        # "1/1" pill of an item's Buy button (absent once sold)
   refresh_button: templates/refresh_button.png
-  # The "confirm?" popups weren't in the screenshots. With auto_learn_popups
-  # the bot saves these itself the first time it confirms each popup; you can
-  # also make them by hand: `python -m shop_bot capture --crop confirm_buy`.
-  # If confirm_refresh.png doesn't exist, confirm_buy.png is tried for both.
+  # Blue "Confirm" button of the popups. confirm_refresh.png comes from the
+  # "Use Skystone to refresh?" screenshot; if confirm_buy.png is missing the
+  # same button is tried, and with auto_learn_popups the purchase popup's
+  # button is saved automatically the first time. Manual alternative:
+  # `python -m shop_bot capture --crop confirm_buy`.
   confirm_buy: templates/confirm_buy.png
   confirm_refresh: templates/confirm_refresh.png
 
@@ -44,21 +45,20 @@ layout:
 
 scroll:
   method: drag              # "drag" (emulators / touch UIs) or "wheel"
-  drag_from: 0.80           # fraction of list height where the drag starts
-  drag_to: 0.30             # ... and ends
-  drag_duration: 0.6        # seconds; slow drags avoid inertia "flings"
-  wheel_clicks: -5
-  settle: 0.7               # wait after scrolling before the next screenshot
+  drag_from: 0.85           # fraction of list height where the drag starts
+  drag_to: 0.15             # ... and ends (one long flick covers the 6-item list)
+  drag_duration: 0.15       # seconds; short = quick flick
+  wheel_clicks: -10
+  settle: 0.3               # wait after scrolling before the next screenshot
   end_diff: 2.0             # mean pixel change below this = reached the bottom
   max_scrolls: 6            # safety cap per page
-  top_after_refresh: true   # the game shows a refreshed list from the top; set false to scroll up each time
 
 actions:
   buy: true                 # click Buy (and confirm) on every target item found
   refresh: true             # refresh the shop after each full scan
   max_refreshes: 50         # each refresh costs 3 skystones -> 50 refreshes = 150 skystones
-  auto_learn_popups: true   # no confirm template yet? find the popup's green button and save it
-  click_delay: 0.8          # wait after each click
+  auto_learn_popups: true   # template doesn't match? find the popup's blue/green button and save it
+  click_delay: 0.35         # wait after each click
   popup_timeout: 4.0        # how long to wait for a confirmation popup
 
 log_csv: shop_log.csv       # one line per item found; set to "" to disable

@@ -18,7 +18,7 @@ class ScreenController:
         import pyautogui
 
         pyautogui.FAILSAFE = True    # slam the mouse into a screen corner to abort
-        pyautogui.PAUSE = 0.05
+        pyautogui.PAUSE = 0.01        # snappy: minimal gap between mouse actions
         self._pg = pyautogui
         self._sct = mss.mss()
         self.mon = self._sct.monitors[monitor]
@@ -45,7 +45,7 @@ class ScreenController:
         self._pg.moveTo(ax, ay1)
         self._pg.mouseDown()
         self._pg.moveTo(ax, ay2, duration=duration)
-        time.sleep(0.15)             # hold briefly so the list doesn't fling
+        time.sleep(0.05)             # brief hold so the list stops where the drag ends
         self._pg.mouseUp()
 
     def wheel(self, x: int, y: int, clicks: int) -> None:

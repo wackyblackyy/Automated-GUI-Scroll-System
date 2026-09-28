@@ -65,19 +65,53 @@ def test_stops_at_bottom_when_nothing_found(bot):
     assert s.clicks == []
 
 
-def test_scroll_to_top_moves_list_up_until_it_stops(bot):
+def test_first_page_mid_list_covers_both_ends(bot):
     s = bot.screen
-    s.offset = len(s.strip) - (LIST_Y2 - LIST_Y1)
-    bot.scroll_to_top()
-    assert s.offset == 0
+    bot.act["buy"] = False
+    s.strip = np.vstack([composite_shop()[LIST_Y1:LIST_Y2], s.base[LIST_Y1:LIST_Y2], s.base[LIST_Y1:LIST_Y2]])
+    s.offset = 950                              # user left the list in the middle
+    assert set(bot.scan_page()) == {"Mystic Medals", "Covenant Bookmarks"}
+
+
+def test_alternates_direction_when_list_keeps_position(bot):
+    s = bot.screen
+    bot.act["buy"] = False
+    bottom = len(s.strip) - (LIST_Y2 - LIST_Y1)
+    s.strip = np.vstack([s.base[LIST_Y1:LIST_Y2]] * 2)       # nothing to find: full sweep
+    bot.scan_page()                                          # page 1 from the top: ends at the bottom
+    assert s.offset == bottom
+    drags = []
+    real = s.drag
+    s.drag = lambda x, y1, y2, d: (drags.append(y2 > y1), real(x, y1, y2, d))
+    bot.scan_page()                                          # page 2 (no reset): straight back up
+    assert s.offset == 0 and all(drags)                      # only upward drags
+    assert len(drags) == 2                                   # full flick + short one; no wasted check flick
+
+
+def test_learns_that_refresh_resets_list_to_top(bot):
+    s = bot.screen
+    bot.act["buy"] = False
+    s.strip = np.vstack([s.base[LIST_Y1:LIST_Y2]] * 2)
+    bot.scan_page()                  # ends at bottom
+    s.offset = 0                     # game resets to top on refresh
+    bot.scan_page()                  # tries up once, flips, sweeps down
+    assert s.offset > 0
+    s.offset = 0
+    drags = []
+    real = s.drag
+    s.drag = lambda x, y1, y2, d: (drags.append(y2 > y1), real(x, y1, y2, d))
+    bot.scan_page()
+    assert drags and not any(drags)  # now goes straight down, no wasted upward flick
 
 
 def test_refresh_popup_falls_back_to_buy_popup_template(tmp_path):
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
     cfg["templates"]["confirm_buy"] = "templates/buy_button.png"      # any existing image
     cfg["templates"]["confirm_refresh"] = "templates/does_not_exist.png"
-    det = ShopDetector(cfg, ROOT)
-    assert det.has_template("confirm_refresh")
+    assert ShopDetector(cfg, ROOT).has_template("confirm_refresh")
+    cfg["templates"]["confirm_buy"] = "templates/does_not_exist.png"
+    cfg["templates"]["confirm_refresh"] = "templates/confirm_refresh.png"
+    assert ShopDetector(cfg, ROOT).has_template("confirm_buy")
 
 
 def popup_over(frame):

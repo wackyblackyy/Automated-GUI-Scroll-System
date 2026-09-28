@@ -65,3 +65,22 @@ def test_list_region_excludes_hero_panel(det):
     det.calibrate(vision.load_image(FIX / "shop_hud.png"))
     x1, y1, x2, y2 = det.list_region()
     assert x1 > 550 and x2 <= 1852 and y1 > 60
+
+
+def test_confirm_button_found_on_real_refresh_popup(det):
+    frame = vision.load_image(FIX / "refresh_popup.png")      # 1530x861, dimmed behind the popup
+    assert det.calibrate(frame) is not None
+    m = det.find_button(frame, "confirm_refresh")
+    assert m is not None
+    x, y = m.center
+    assert 790 <= x <= 1005 and 525 <= y <= 585                # Confirm, not Cancel (x 525-750)
+
+
+def test_popup_button_finder_picks_blue_confirm_not_cancel(det):
+    after = vision.load_image(FIX / "refresh_popup.png")
+    before = cv2.resize(vision.load_image(FIX / "shop_hud.png"), (after.shape[1], after.shape[0]))
+    det.calibrate(after)
+    m = det.find_popup_button(before, after)
+    assert m is not None
+    x, y = m.center
+    assert 790 <= x <= 1005 and 525 <= y <= 585

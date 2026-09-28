@@ -48,8 +48,11 @@ class ShopDetector:
         self.confirm_buy_tmpl = _optional(base / t.get("confirm_buy", ""))
         # the refresh popup's "Yes" usually looks like the purchase one; reuse it if not captured
         self.confirm_refresh_tmpl = _optional(base / t.get("confirm_refresh", ""))
+        # both popups share the game's dialog style; try one's button for the other until learned
         if self.confirm_refresh_tmpl is None:
             self.confirm_refresh_tmpl = self.confirm_buy_tmpl
+        if self.confirm_buy_tmpl is None:
+            self.confirm_buy_tmpl = self.confirm_refresh_tmpl
         self.targets = [
             (tg["name"], vision.load_image(base / tg["template"]), float(tg.get("threshold", 0.8)))
             for tg in cfg["targets"]
@@ -155,15 +158,15 @@ class ShopDetector:
     def find_popup_button(self, before: np.ndarray, after: np.ndarray) -> Match | None:
         """Find the confirm button of a popup that appeared between two frames.
 
-        The game's confirm buttons are green like the shop's Buy/Refresh
-        buttons. Green blobs that were not already on screen before the click
-        belong to the popup; the right-most sizeable one is the Yes/Buy button
-        (Cancel sits on the left and isn't green).
+        The game's confirm buttons are bright blue ("Confirm") or green like
+        the shop's Buy button. Such blobs that were not already on screen
+        before the click belong to the popup; the right-most sizeable one is
+        the Confirm button (Cancel sits on the left and is brown).
         """
         if before.shape != after.shape:
             return None
         s = self.calibration.scale if self.calibration else 1.0
-        new = _green_mask(after) & ~cv2.dilate(_green_mask(before), np.ones((15, 15), np.uint8))
+        new = _button_mask(after) & ~cv2.dilate(_button_mask(before), np.ones((15, 15), np.uint8))
         new = cv2.morphologyEx(new, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
         new = cv2.morphologyEx(new, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
         n, _, stats, _ = cv2.connectedComponentsWithStats(new)
@@ -194,10 +197,16 @@ class ShopDetector:
         return path
 
 
-def _green_mask(frame: np.ndarray) -> np.ndarray:
-    """Pixels with the hue/saturation of the game's green buttons, at full (undimmed) brightness."""
+def _button_mask(frame: np.ndarray) -> np.ndarray:
+    """Pixels coloured like the game's green (Buy) or bright blue (Confirm) buttons.
+
+    The popup banner behind Confirm is the same hue but more saturated
+    (S ~200 vs ~170), hence the saturation ceiling for blue.
+    """
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    return cv2.inRange(hsv, (50, 90, 45), (80, 255, 255))
+    green = cv2.inRange(hsv, (50, 90, 45), (80, 255, 255))
+    blue = cv2.inRange(hsv, (98, 120, 55), (116, 190, 255))
+    return green | blue
 
 
 def _optional(path: Path) -> np.ndarray | None:

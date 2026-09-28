@@ -8,6 +8,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from . import vision
@@ -31,6 +32,8 @@ class ShopBot:
         self.totals: Counter[str] = Counter()
         self.bought: Counter[str] = Counter()
         self.refreshes = 0
+        self.scroll_up = True     # scan direction for the next page (flips each page)
+        self.at_end = False       # False until the list has been seen to stop at an end
         self.csv_path = Path(cfg["log_csv"]) if cfg.get("log_csv") else None
 
     # ------------------------------------------------------------ main loop
@@ -43,10 +46,7 @@ class ShopBot:
 
         self._require_hud()
         try:
-            self.scroll_to_top()        # the list may have been left scrolled down
             while True:
-                if self.refreshes and not self.scroll_cfg["top_after_refresh"]:
-                    self.scroll_to_top()
                 self.scan_page()
                 if not self.act["refresh"]:
                     break
@@ -58,48 +58,82 @@ class ShopBot:
             self._summary()
 
     def scan_page(self) -> dict[str, int]:
-        """Scan the whole list top to bottom. Returns {item: count} seen on this page."""
-        seen_this_page: dict[str, Match] = {}
-        prev_list = None
-        for step in range(self.scroll_cfg["max_scrolls"] + 1):
-            frame = self._require_hud()
-            region = self.det.list_region()
-            for f in self.det.find_targets(frame):
-                if f.name in seen_this_page:
-                    continue            # already handled this item (seen before a scroll)
-                if f.buy is None and not self._near_bottom(f.icon, region):
-                    log.info("%s visible but no active Buy button (sold out?)", f.name)
-                    seen_this_page[f.name] = f.icon
-                    continue
-                if f.buy is None:
-                    continue            # row cut off at the bottom; catch it after scrolling
-                seen_this_page[f.name] = f.icon
-                self._on_found(f)
+        """Scan the whole list, scrolling from one end to the other.
 
-            if len(seen_this_page) == len(self.det.targets):
-                break                   # everything we want is already found on this page
-
-            crop = _crop(frame, region)
-            if prev_list is not None and vision.frame_diff(crop, prev_list) < self.scroll_cfg["end_diff"]:
-                log.debug("list stopped moving -> bottom reached after %d scrolls", step)
-                break
-            prev_list = crop
-            self._scroll(region)
-
-        if not seen_this_page:
-            log.info("Page %d: no target items", self.refreshes)
-        return {k: 1 for k in seen_this_page}
-
-    def scroll_to_top(self) -> None:
+        The list is scanned in whichever direction it is already facing: down
+        on one page, back up on the next, so no time goes into returning to
+        the top. If the list turns out to be at the end we were going to
+        scroll towards (e.g. the game reset it to the top after a refresh),
+        the bot flips direction after one scroll and remembers that for
+        later pages. Returns {item: 1} for each target seen on this page.
+        """
+        seen: dict[str, Match] = {}
+        up = self.scroll_up
+        at_end = self.at_end          # do we know the page starts at one end of the list?
+        moved = flipped_early = False
         prev = None
-        for _ in range(self.scroll_cfg["max_scrolls"]):
+        for _ in range(2 * self.scroll_cfg["max_scrolls"] + 2):
             frame = self._require_hud()
             region = self.det.list_region()
+            if self._scan_frame(frame, region, seen):
+                frame = self.screen.grab()    # a purchase changed the rows; don't mistake it for scrolling
+            if len(seen) == len(self.det.targets):
+                self.at_end = False   # stopped mid-list; next page must verify both ends
+                break
             crop = _crop(frame, region)
-            if prev is not None and vision.frame_diff(crop, prev) < self.scroll_cfg["end_diff"]:
-                return
+            if prev is not None:
+                still = vision.frame_diff(crop, prev) < self.scroll_cfg["end_diff"]
+                moved |= not still
+                # an end is reached when the list didn't move, or moved less than the flick
+                if still or self._short_move(prev, crop, up):
+                    if at_end and moved:
+                        self.at_end = True
+                        break         # travelled end to end: whole list covered
+                    flipped_early |= at_end and not moved
+                    at_end, moved, up = True, False, not up
             prev = crop
-            self._scroll(region, up=True)
+            self._scroll(region, up=up)
+
+        # next page: keep going the way the list resets, otherwise come back the other way
+        self.scroll_up = up if flipped_early else not up
+        if not seen:
+            log.info("Page %d: no target items", self.refreshes)
+        return {k: 1 for k in seen}
+
+    def _short_move(self, prev: np.ndarray, cur: np.ndarray, up: bool) -> bool:
+        """True if the last flick moved the list noticeably less than the drag distance,
+        i.e. it bumped into the end. Saves a whole extra flick per page."""
+        if self.scroll_cfg["method"] != "drag":
+            return False
+        h = prev.shape[0]
+        expected = (self.scroll_cfg["drag_from"] - self.scroll_cfg["drag_to"]) * h
+        bh = h // 4
+        g_prev = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+        g_cur = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
+        # follow a band of rows from the edge the content is moving away from
+        band = g_prev[:bh] if up else g_prev[h - bh:]
+        res = cv2.matchTemplate(g_cur, band, cv2.TM_CCOEFF_NORMED)
+        _, score, _, (_, y) = cv2.minMaxLoc(res)
+        if score < 0.9:
+            return False          # band scrolled out of view: moved far, not at the end
+        shift = y if up else (h - bh) - y
+        return 0 < shift < 0.85 * expected
+
+    def _scan_frame(self, frame: np.ndarray, region, seen: dict[str, Match]) -> bool:
+        """Handle new target items in this frame. Returns True if anything was clicked."""
+        clicked = False
+        for f in self.det.find_targets(frame):
+            if f.name in seen:
+                continue                # already handled on this page
+            if f.buy is None:
+                if not self._near_bottom(f.icon, region):
+                    log.info("%s visible but already bought / sold out", f.name)
+                    seen[f.name] = f.icon
+                continue                # else: row cut off at the bottom; caught after scrolling
+            seen[f.name] = f.icon
+            self._on_found(f)
+            clicked |= bool(self.act["buy"])
+        return clicked
 
     # -------------------------------------------------------------- actions
     def _on_found(self, f: Found) -> None:
@@ -121,7 +155,6 @@ class ShopBot:
         if not self._confirm("confirm_buy", before):
             log.warning("Purchase popup for %s was not confirmed (not enough gold?)", f.name)
             return False
-        time.sleep(0.5)
         self.bought[f.name] += 1
         log.info("Bought %s", f.name)
         return True
@@ -135,7 +168,7 @@ class ShopBot:
         if not self.screen.dry_run and not self._confirm("confirm_refresh", frame):
             raise StopBot("Refresh popup was not confirmed (out of skystones?)")
         self.refreshes += 1
-        time.sleep(self.act["click_delay"] + 0.7)   # let the new list animate in
+        self._wait_for_new_list(_crop(frame, self.det.list_region()))
         log.info("Refreshed (%d/%d)", self.refreshes, self.act["max_refreshes"])
 
     def _scroll(self, region, up: bool = False) -> None:
@@ -163,6 +196,18 @@ class ShopBot:
             time.sleep(1.0)
         raise StopBot("Secret Shop screen not visible - open the Secret Shop and try again")
 
+    def _wait_for_new_list(self, old: np.ndarray, timeout: float = 2.5) -> None:
+        """Return as soon as the refreshed list is on screen (instead of a fixed sleep)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            frame = self.screen.grab()
+            if self.det.hud_visible(frame):
+                new = _crop(frame, self.det.list_region())
+                if vision.frame_diff(new, old) > 8:
+                    time.sleep(self.scroll_cfg["settle"])   # let the slide-in animation finish
+                    return
+            time.sleep(0.05)
+
     def _confirm(self, which: str, before: np.ndarray) -> bool:
         """Wait for the "are you sure?" popup and press its Yes/Buy button.
 
@@ -173,7 +218,7 @@ class ShopBot:
         deadline = time.time() + self.act["popup_timeout"]
         last: Match | None = None
         while time.time() < deadline:
-            time.sleep(0.25)
+            time.sleep(0.1)
             frame = self.screen.grab()
             m = self.det.find_button(frame, which)
             if m:
