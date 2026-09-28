@@ -202,3 +202,39 @@ def test_full_automatic_run(tmp_path, monkeypatch):
     assert screen.pending is None
     assert (tmp_path / "confirm_buy.png").is_file()
     assert len((tmp_path / "log.csv").read_text().splitlines()) == 5
+
+
+class AnimatedFakeScreen(FakeScreen):
+    """Like the live game: the background flickers, so no two frames are identical."""
+
+    def __init__(self):
+        super().__init__()
+        self.rng = np.random.default_rng(0)
+
+    def grab(self):
+        f = super().grab().astype(np.int16)
+        f += self.rng.integers(-12, 13, f.shape, dtype=np.int16)      # mean abs change ~6
+        f[400:700, 1000:1500] += int(self.rng.integers(-40, 40))       # a flickering light
+        return np.clip(f, 0, 255).astype(np.uint8)
+
+
+def test_full_sweep_and_turnaround_with_animated_background(monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
+    cfg["log_csv"] = ""
+    cfg["actions"]["buy"] = False
+    screen = AnimatedFakeScreen()
+    screen.strip = np.vstack([screen.base[LIST_Y1:LIST_Y2]] * 2)   # nothing to find
+    bot = ShopBot(cfg, ShopDetector(cfg, ROOT), screen)
+    drags = []
+    real = screen.drag
+    screen.drag = lambda x, y1, y2, d: (drags.append("up" if y2 > y1 else "down"), real(x, y1, y2, d))
+
+    bot.scan_page()                    # page 1 at the top: one wasted up-flick, then down to the bottom
+    bottom = len(screen.strip) - (LIST_Y2 - LIST_Y1)
+    assert screen.offset == bottom
+    assert drags == ["up", "down", "down"], drags
+    drags.clear()
+    bot.scan_page()                    # page 2: straight back up
+    assert screen.offset == 0
+    assert drags == ["up", "up"], drags

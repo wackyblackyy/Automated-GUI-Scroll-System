@@ -72,7 +72,7 @@ class ShopBot:
         at_end = self.at_end          # do we know the page starts at one end of the list?
         moved = flipped_early = False
         prev = None
-        for _ in range(2 * self.scroll_cfg["max_scrolls"] + 2):
+        for _ in range(self.scroll_cfg["max_scrolls"] + 1):
             frame = self._require_hud()
             region = self.det.list_region()
             if self._scan_frame(frame, region, seen):
@@ -82,10 +82,13 @@ class ShopBot:
                 break
             crop = _crop(frame, region)
             if prev is not None:
-                still = vision.frame_diff(crop, prev) < self.scroll_cfg["end_diff"]
+                shift = self._list_shift(prev, crop, up)
+                still = shift is not None and shift < self._min_shift(crop)
                 moved |= not still
+                log.debug("flick %s moved the list %s px", "up" if up else "down",
+                          "far" if shift is None else int(shift))
                 # an end is reached when the list didn't move, or moved less than the flick
-                if still or self._short_move(prev, crop, up):
+                if still or (shift is not None and shift < 0.85 * self._flick_px(crop)):
                     if at_end and moved:
                         self.at_end = True
                         break         # travelled end to end: whole list covered
@@ -94,30 +97,46 @@ class ShopBot:
             prev = crop
             self._scroll(region, up=up)
 
+        else:
+            log.warning("Scroll limit reached without finding the list ends; refreshing anyway")
+            self.at_end = False
         # next page: keep going the way the list resets, otherwise come back the other way
         self.scroll_up = up if flipped_early else not up
         if not seen:
             log.info("Page %d: no target items", self.refreshes)
         return {k: 1 for k in seen}
 
-    def _short_move(self, prev: np.ndarray, cur: np.ndarray, up: bool) -> bool:
-        """True if the last flick moved the list noticeably less than the drag distance,
-        i.e. it bumped into the end. Saves a whole extra flick per page."""
+    def _flick_px(self, crop: np.ndarray) -> float:
         if self.scroll_cfg["method"] != "drag":
-            return False
+            return 0.0
+        return (self.scroll_cfg["drag_from"] - self.scroll_cfg["drag_to"]) * crop.shape[0]
+
+    def _min_shift(self, crop: np.ndarray) -> float:
+        return max(6.0, 0.02 * crop.shape[0])
+
+    def _list_shift(self, prev: np.ndarray, cur: np.ndarray, up: bool) -> float | None:
+        """How far the list content moved in the scroll direction, in pixels.
+
+        Tracks a band of rows (icons, names, prices) between two frames, so the
+        game's animated background doesn't count as movement. Returns None
+        when the band left the view, i.e. the list moved further than can be
+        measured (a full flick).
+        """
         h = prev.shape[0]
-        expected = (self.scroll_cfg["drag_from"] - self.scroll_cfg["drag_to"]) * h
         bh = h // 4
-        g_prev = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
-        g_cur = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
-        # follow a band of rows from the edge the content is moving away from
-        band = g_prev[:bh] if up else g_prev[h - bh:]
-        res = cv2.matchTemplate(g_cur, band, cv2.TM_CCOEFF_NORMED)
-        _, score, _, (_, y) = cv2.minMaxLoc(res)
-        if score < 0.9:
-            return False          # band scrolled out of view: moved far, not at the end
-        shift = y if up else (h - bh) - y
-        return 0 < shift < 0.85 * expected
+        g_prev = cv2.GaussianBlur(cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        g_cur = cv2.GaussianBlur(cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        # follow the band at the edge the content moves away from, so it stays in view
+        y0 = 0 if up else h - bh
+        band = g_prev[y0:y0 + bh]
+        # same place? (checked first: similar-looking rows must not fake a move)
+        if cv2.matchTemplate(g_cur[y0:y0 + bh], band, cv2.TM_CCOEFF_NORMED)[0, 0] > 0.9:
+            return 0.0
+        res = cv2.matchTemplate(g_cur, band, cv2.TM_CCOEFF_NORMED)[:, 0]
+        y = int(np.argmax(res))
+        if res[y] < 0.8:
+            return None
+        return float(y - y0 if up else y0 - y)
 
     def _scan_frame(self, frame: np.ndarray, region, seen: dict[str, Match]) -> bool:
         """Handle new target items in this frame. Returns True if anything was clicked."""

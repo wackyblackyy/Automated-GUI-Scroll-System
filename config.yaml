@@ -50,8 +50,7 @@ scroll:
   drag_duration: 0.15       # seconds; short = quick flick
   wheel_clicks: -10
   settle: 0.3               # wait after scrolling before the next screenshot
-  end_diff: 2.0             # mean pixel change below this = reached the bottom
-  max_scrolls: 6            # safety cap per page
+  max_scrolls: 8            # safety cap of flicks per page; refreshes anyway when reached
 
 actions:
   buy: true                 # click Buy (and confirm) on every target item found
